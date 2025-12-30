@@ -3,21 +3,23 @@ from PyPDF2 import PdfReader
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.llms import HuggingFaceHub
 from langchain.chains import RetrievalQA
 
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
 st.set_page_config(page_title="PDF Analyzer Chatbot", layout="wide")
-st.title("📄 PDF Analyzer Chatbot")
+st.title("📄 PDF Analyzer Chatbot (Free & Stable)")
+st.write("Upload PDFs and ask questions.")
 
 # -----------------------------------
-# API KEY (Gemini only for chat)
+# CHECK HF TOKEN
 # -----------------------------------
-GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+if "HUGGINGFACEHUB_API_TOKEN" not in st.secrets:
+    st.error("HuggingFace API token not found in Streamlit Secrets.")
+    st.stop()
 
 # -----------------------------------
 # PDF UPLOAD
@@ -53,16 +55,18 @@ def split_text(text):
 
 def create_vector_store(chunks):
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name="sentence-transformers/paraphrase-MiniLM-L3-v2"
     )
     return FAISS.from_texts(chunks, embeddings)
 
 
 def create_qa_chain(vector_store):
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
-        temperature=0.3,
-        google_api_key=GOOGLE_API_KEY
+    llm = HuggingFaceHub(
+        repo_id="google/flan-t5-base",
+        model_kwargs={
+            "temperature": 0.3,
+            "max_length": 512
+        }
     )
 
     return RetrievalQA.from_chain_type(
@@ -78,7 +82,7 @@ if pdf_files:
         raw_text = extract_text_from_pdfs(pdf_files)
 
         if not raw_text.strip():
-            st.error("No text could be extracted from the PDFs.")
+            st.error("No text could be extracted from PDFs.")
             st.stop()
 
         chunks = split_text(raw_text)
