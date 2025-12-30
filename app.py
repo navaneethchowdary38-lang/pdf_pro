@@ -65,7 +65,7 @@ def create_qa_chain(vector_store):
     repo_id="google/flan-t5-base",
     huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"],
     temperature=0.3
-)
+       )
 
     )
 
