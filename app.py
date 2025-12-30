@@ -1,12 +1,12 @@
 import streamlit as st
 from pypdf import PdfReader
 
-
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
 
 from transformers import pipeline
 
@@ -14,8 +14,8 @@ from transformers import pipeline
 # STREAMLIT CONFIG
 # -----------------------------------
 st.set_page_config(page_title="PDF Analyzer Chatbot", layout="wide")
-st.title("📄 PDF Analyzer Chatbot (Free & Stable)")
-st.write("Upload PDFs and ask questions based on their content.")
+st.title("📄 PDF Analyzer Chatbot (Accurate & Free)")
+st.write("Upload PDFs and ask questions based ONLY on their content.")
 
 # -----------------------------------
 # PDF UPLOAD
@@ -24,6 +24,29 @@ pdf_files = st.file_uploader(
     "Upload PDF files",
     type=["pdf"],
     accept_multiple_files=True
+)
+
+# -----------------------------------
+# STRICT QA PROMPT (VERY IMPORTANT)
+# -----------------------------------
+QA_PROMPT = PromptTemplate(
+    input_variables=["context", "question"],
+    template="""
+You are a factual assistant.
+
+Answer the question ONLY using the information provided in the context below.
+Do NOT use outside knowledge.
+If the answer is not clearly present in the context, say exactly:
+"I cannot find the answer in the provided documents."
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+"""
 )
 
 # -----------------------------------
@@ -42,8 +65,8 @@ def extract_text_from_pdfs(pdfs):
 
 def split_text(text):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=150
+        chunk_size=800,      # smaller chunks = better retrieval
+        chunk_overlap=200
     )
     chunks = splitter.split_text(text)
     return [chunk for chunk in chunks if len(chunk.strip()) > 50]
@@ -57,19 +80,25 @@ def create_vector_store(chunks):
 
 
 def create_qa_chain(vector_store):
-    # Local, free, stable LLM (NO API, NO TOKEN)
+    # Free, local, stable model
     hf_pipeline = pipeline(
         "text2text-generation",
-        model="google/flan-t5-base",
+        model="google/flan-t5-base",  # change to flan-t5-large if RAM allows
         max_length=512,
-        temperature=0.3
+        temperature=0.0               # VERY IMPORTANT: reduces hallucinations
     )
 
     llm = HuggingFacePipeline(pipeline=hf_pipeline)
 
+    retriever = vector_store.as_retriever(
+        search_kwargs={"k": 6}         # fetch more relevant chunks
+    )
+
     return RetrievalQA.from_chain_type(
         llm=llm,
-        retriever=vector_store.as_retriever()
+        chain_type="stuff",
+        retriever=retriever,
+        chain_type_kwargs={"prompt": QA_PROMPT}
     )
 
 # -----------------------------------
@@ -92,7 +121,7 @@ if pdf_files:
     question = st.text_input("Ask a question from the PDFs")
 
     if question:
-        with st.spinner("Generating answer..."):
+        with st.spinner("Generating accurate answer..."):
             answer = qa_chain.run(question)
 
         st.subheader("Answer")
