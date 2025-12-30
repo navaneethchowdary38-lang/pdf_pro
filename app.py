@@ -5,7 +5,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.llms import HuggingFaceHub
-
 from langchain.chains import RetrievalQA
 
 # -----------------------------------
@@ -13,13 +12,13 @@ from langchain.chains import RetrievalQA
 # -----------------------------------
 st.set_page_config(page_title="PDF Analyzer Chatbot", layout="wide")
 st.title("📄 PDF Analyzer Chatbot (Free & Stable)")
-st.write("Upload PDFs and ask questions.")
+st.write("Upload PDFs and ask questions based on their content.")
 
 # -----------------------------------
-# CHECK HF TOKEN
+# CHECK HUGGING FACE TOKEN
 # -----------------------------------
 if "HUGGINGFACEHUB_API_TOKEN" not in st.secrets:
-    st.error("HuggingFace API token not found in Streamlit Secrets.")
+    st.error("Hugging Face API token not found in Streamlit Secrets.")
     st.stop()
 
 # -----------------------------------
@@ -51,7 +50,8 @@ def split_text(text):
         chunk_overlap=150
     )
     chunks = splitter.split_text(text)
-    return [c for c in chunks if len(c.strip()) > 50]
+    return [chunk for chunk in chunks if len(chunk.strip()) > 50]
+
 
 def create_vector_store(chunks):
     embeddings = HuggingFaceEmbeddings(
@@ -62,11 +62,9 @@ def create_vector_store(chunks):
 
 def create_qa_chain(vector_store):
     llm = HuggingFaceHub(
-    repo_id="google/flan-t5-base",
-    huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"],
-    temperature=0.3
-       )
-
+        repo_id="google/flan-t5-base",
+        huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"],
+        temperature=0.3
     )
 
     return RetrievalQA.from_chain_type(
@@ -82,7 +80,7 @@ if pdf_files:
         raw_text = extract_text_from_pdfs(pdf_files)
 
         if not raw_text.strip():
-            st.error("No text could be extracted from PDFs.")
+            st.error("No text could be extracted from the PDFs.")
             st.stop()
 
         chunks = split_text(raw_text)
@@ -95,10 +93,10 @@ if pdf_files:
 
     if question:
         with st.spinner("Generating answer..."):
-            response = qa_chain.run(question)
+            answer = qa_chain.run(question)
 
         st.subheader("Answer")
-        st.write(response)
+        st.write(answer)
 
 else:
     st.info("Please upload at least one PDF to start.")
