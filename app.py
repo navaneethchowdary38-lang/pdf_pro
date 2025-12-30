@@ -4,8 +4,10 @@ from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain_community.llms import HuggingFaceHub
+from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
+
+from transformers import pipeline
 
 # -----------------------------------
 # STREAMLIT CONFIG
@@ -13,13 +15,6 @@ from langchain.chains import RetrievalQA
 st.set_page_config(page_title="PDF Analyzer Chatbot", layout="wide")
 st.title("📄 PDF Analyzer Chatbot (Free & Stable)")
 st.write("Upload PDFs and ask questions based on their content.")
-
-# -----------------------------------
-# CHECK HUGGING FACE TOKEN
-# -----------------------------------
-if "HUGGINGFACEHUB_API_TOKEN" not in st.secrets:
-    st.error("Hugging Face API token not found in Streamlit Secrets.")
-    st.stop()
 
 # -----------------------------------
 # PDF UPLOAD
@@ -61,11 +56,15 @@ def create_vector_store(chunks):
 
 
 def create_qa_chain(vector_store):
-    llm = HuggingFaceHub(
-        repo_id="google/flan-t5-base",
-        huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"],
+    # Local, free, stable LLM (NO API, NO TOKEN)
+    hf_pipeline = pipeline(
+        "text2text-generation",
+        model="google/flan-t5-base",
+        max_length=512,
         temperature=0.3
     )
+
+    llm = HuggingFacePipeline(pipeline=hf_pipeline)
 
     return RetrievalQA.from_chain_type(
         llm=llm,
