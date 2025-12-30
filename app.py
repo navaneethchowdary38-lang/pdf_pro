@@ -52,7 +52,6 @@ def split_text(text):
     chunks = splitter.split_text(text)
     return [c for c in chunks if len(c.strip()) > 50]
 
-
 def create_vector_store(chunks):
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/paraphrase-MiniLM-L3-v2"
