@@ -4,18 +4,15 @@ from pypdf import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain_community.llms import HuggingFacePipeline
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
 
 from transformers import pipeline
 
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
-st.set_page_config(page_title="PDF Analyzer Chatbot", layout="wide")
-st.title("📄 PDF Analyzer Chatbot (Accurate & Free)")
-st.write("Upload PDFs and ask questions based ONLY on their content.")
+st.set_page_config(page_title="PDF QA (Accurate)", layout="wide")
+st.title("📄 PDF Question Answering (Accurate)")
+st.write("Answers are extracted EXACTLY from the PDF.")
 
 # -----------------------------------
 # PDF UPLOAD
@@ -24,29 +21,6 @@ pdf_files = st.file_uploader(
     "Upload PDF files",
     type=["pdf"],
     accept_multiple_files=True
-)
-
-# -----------------------------------
-# STRICT QA PROMPT (VERY IMPORTANT)
-# -----------------------------------
-QA_PROMPT = PromptTemplate(
-    input_variables=["context", "question"],
-    template="""
-You are a factual assistant.
-
-Answer the question ONLY using the information provided in the context below.
-Do NOT use outside knowledge.
-If the answer is not clearly present in the context, say exactly:
-"I cannot find the answer in the provided documents."
-
-Context:
-{context}
-
-Question:
-{question}
-
-Answer:
-"""
 )
 
 # -----------------------------------
@@ -65,41 +39,30 @@ def extract_text_from_pdfs(pdfs):
 
 def split_text(text):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,      # smaller chunks = better retrieval
-        chunk_overlap=200
+        chunk_size=500,      # small chunks for exact matching
+        chunk_overlap=100
     )
-    chunks = splitter.split_text(text)
-    return [chunk for chunk in chunks if len(chunk.strip()) > 50]
+    return splitter.split_text(text)
 
 
-def create_vector_store(chunks):
+def build_vector_store(chunks):
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-MiniLM-L3-v2"
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     return FAISS.from_texts(chunks, embeddings)
 
 
-def create_qa_chain(vector_store):
-    # Free, local, stable model
-    hf_pipeline = pipeline(
-        "text2text-generation",
-        model="google/flan-t5-base",  # change to flan-t5-large if RAM allows
-        max_length=512,
-        temperature=0.0               # VERY IMPORTANT: reduces hallucinations
+# -----------------------------------
+# LOAD EXTRACTIVE QA MODEL (KEY PART)
+# -----------------------------------
+@st.cache_resource
+def load_qa_model():
+    return pipeline(
+        "question-answering",
+        model="deepset/roberta-base-squad2"
     )
 
-    llm = HuggingFacePipeline(pipeline=hf_pipeline)
-
-    retriever = vector_store.as_retriever(
-        search_kwargs={"k": 6}         # fetch more relevant chunks
-    )
-
-    return RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=retriever,
-        chain_type_kwargs={"prompt": QA_PROMPT}
-    )
+qa_model = load_qa_model()
 
 # -----------------------------------
 # MAIN LOGIC
@@ -107,25 +70,34 @@ def create_qa_chain(vector_store):
 if pdf_files:
     with st.spinner("Processing PDFs..."):
         raw_text = extract_text_from_pdfs(pdf_files)
-
-        if not raw_text.strip():
-            st.error("No text could be extracted from the PDFs.")
-            st.stop()
-
         chunks = split_text(raw_text)
-        vector_store = create_vector_store(chunks)
-        qa_chain = create_qa_chain(vector_store)
+        vector_store = build_vector_store(chunks)
 
     st.success("PDFs processed successfully!")
 
-    question = st.text_input("Ask a question from the PDFs")
+    question = st.text_input("Ask a question")
 
     if question:
-        with st.spinner("Generating accurate answer..."):
-            answer = qa_chain.run(question)
+        # Retrieve most relevant chunks
+        docs = vector_store.similarity_search(question, k=3)
 
-        st.subheader("Answer")
-        st.write(answer)
+        best_answer = ""
+        best_score = 0
+
+        for doc in docs:
+            result = qa_model(
+                question=question,
+                context=doc.page_content
+            )
+            if result["score"] > best_score:
+                best_score = result["score"]
+                best_answer = result["answer"]
+
+        st.subheader("Answer (from PDF)")
+        if best_answer.strip():
+            st.write(best_answer)
+        else:
+            st.write("Answer not found in the document.")
 
 else:
-    st.info("Please upload at least one PDF to start.")
+    st.info("Please upload at least one PDF.")
