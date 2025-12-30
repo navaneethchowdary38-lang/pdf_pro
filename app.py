@@ -1,25 +1,33 @@
 import streamlit as st
 from PyPDF2 import PdfReader
-from dotenv import load_dotenv
 import os
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_google_genai import (
+    GoogleGenerativeAIEmbeddings,
+    ChatGoogleGenerativeAI
+)
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
 # -----------------------------------
-# ENV SETUP
-# -----------------------------------
-load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
-
-# -----------------------------------
-# STREAMLIT UI
+# STREAMLIT CONFIG
 # -----------------------------------
 st.set_page_config(page_title="PDF Analyzer Chatbot", layout="wide")
 st.title("📄 PDF Analyzer Chatbot")
 st.write("Upload PDFs and ask questions based on their content.")
+
+# -----------------------------------
+# API KEY (Streamlit-safe)
+# -----------------------------------
+# ❌ Do NOT use load_dotenv() on Streamlit Cloud
+# ✅ Use st.secrets instead
+
+GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY")
+
+if not GOOGLE_API_KEY:
+    st.error("GOOGLE_API_KEY not found. Please set it in Streamlit Secrets.")
+    st.stop()
 
 # -----------------------------------
 # PDF UPLOAD
@@ -38,21 +46,26 @@ def extract_text_from_pdfs(pdfs):
     for pdf in pdfs:
         reader = PdfReader(pdf)
         for page in reader.pages:
-            text += page.extract_text() or ""
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
     return text
 
 
 def split_text(text):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
+        chunk_size=1500,
         chunk_overlap=200
     )
-    return splitter.split_text(text)
+    chunks = splitter.split_text(text)
+    # remove empty chunks
+    return [chunk for chunk in chunks if chunk.strip()]
 
 
 def create_vector_store(chunks):
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001"
+        model="text-embedding-004",
+        google_api_key=GOOGLE_API_KEY
     )
     return FAISS.from_texts(chunks, embeddings)
 
@@ -60,7 +73,8 @@ def create_vector_store(chunks):
 def create_qa_chain(vector_store):
     llm = ChatGoogleGenerativeAI(
         model="gemini-pro",
-        temperature=0.3
+        temperature=0.3,
+        google_api_key=GOOGLE_API_KEY
     )
     return RetrievalQA.from_chain_type(
         llm=llm,
@@ -73,7 +87,17 @@ def create_qa_chain(vector_store):
 if pdf_files:
     with st.spinner("Processing PDFs..."):
         raw_text = extract_text_from_pdfs(pdf_files)
+
+        if not raw_text.strip():
+            st.error("No text could be extracted from the PDFs.")
+            st.stop()
+
         chunks = split_text(raw_text)
+
+        if len(chunks) == 0:
+            st.error("Text splitting failed. No chunks created.")
+            st.stop()
+
         vector_store = create_vector_store(chunks)
         qa_chain = create_qa_chain(vector_store)
 
@@ -90,4 +114,3 @@ if pdf_files:
 
 else:
     st.info("Please upload at least one PDF to start.")
-
