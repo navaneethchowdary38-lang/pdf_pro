@@ -12,7 +12,7 @@ from transformers import pipeline
 # -----------------------------------
 st.set_page_config(page_title="PDF QA (Accurate)", layout="wide")
 st.title("📄 PDF Question Answering (Accurate)")
-st.write("Answers are extracted EXACTLY from the PDF.")
+st.write("Answers are extracted EXACTLY from the PDF (no hallucination).")
 
 # -----------------------------------
 # PDF UPLOAD
@@ -39,8 +39,8 @@ def extract_text_from_pdfs(pdfs):
 
 def split_text(text):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=100
+        chunk_size=700,      # slightly larger for lists
+        chunk_overlap=150
     )
     return splitter.split_text(text)
 
@@ -75,10 +75,11 @@ if pdf_files:
 
     st.success("PDFs processed successfully!")
 
-    question = st.text_input("Ask a question")
+    question = st.text_input("Ask a question (use wording from the PDF)")
 
     if question:
-        docs = vector_store.similarity_search(question, k=5)
+        # retrieve more chunks to avoid missing list items
+        docs = vector_store.similarity_search(question, k=8)
 
         answers = []
 
@@ -88,8 +89,8 @@ if pdf_files:
                 context=doc.page_content
             )
 
-            # confidence threshold to avoid noise
-            if result["score"] > 0.25:
+            # LOWER threshold – extractive models are conservative
+            if result["score"] > 0.05:
                 answers.append(result["answer"].strip())
 
         # remove duplicates while preserving order
