@@ -4,7 +4,8 @@ from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.llms import HuggingFaceHub
+from langchain_community.llms import HuggingFaceHub
+
 from langchain.chains import RetrievalQA
 
 # -----------------------------------
@@ -61,11 +62,11 @@ def create_vector_store(chunks):
 
 def create_qa_chain(vector_store):
     llm = HuggingFaceHub(
-        repo_id="google/flan-t5-base",
-        model_kwargs={
-            "temperature": 0.3,
-            "max_length": 512
-        }
+    repo_id="google/flan-t5-base",
+    huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"],
+    temperature=0.3
+)
+
     )
 
     return RetrievalQA.from_chain_type(
