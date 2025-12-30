@@ -39,7 +39,7 @@ def extract_text_from_pdfs(pdfs):
 
 def split_text(text):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,      # small chunks for exact matching
+        chunk_size=500,
         chunk_overlap=100
     )
     return splitter.split_text(text)
@@ -53,7 +53,7 @@ def build_vector_store(chunks):
 
 
 # -----------------------------------
-# LOAD EXTRACTIVE QA MODEL (KEY PART)
+# LOAD EXTRACTIVE QA MODEL
 # -----------------------------------
 @st.cache_resource
 def load_qa_model():
@@ -78,24 +78,28 @@ if pdf_files:
     question = st.text_input("Ask a question")
 
     if question:
-        # Retrieve most relevant chunks
-        docs = vector_store.similarity_search(question, k=3)
+        docs = vector_store.similarity_search(question, k=5)
 
-        best_answer = ""
-        best_score = 0
+        answers = []
 
         for doc in docs:
             result = qa_model(
                 question=question,
                 context=doc.page_content
             )
-            if result["score"] > best_score:
-                best_score = result["score"]
-                best_answer = result["answer"]
+
+            # confidence threshold to avoid noise
+            if result["score"] > 0.25:
+                answers.append(result["answer"].strip())
+
+        # remove duplicates while preserving order
+        answers = list(dict.fromkeys(answers))
 
         st.subheader("Answer (from PDF)")
-        if best_answer.strip():
-            st.write(best_answer)
+
+        if answers:
+            for ans in answers:
+                st.write(f"- {ans}")
         else:
             st.write("Answer not found in the document.")
 
