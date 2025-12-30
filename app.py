@@ -1,13 +1,10 @@
 import streamlit as st
 from PyPDF2 import PdfReader
-import os
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_google_genai import (
-    GoogleGenerativeAIEmbeddings,
-    ChatGoogleGenerativeAI
-)
+from langchain.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import RetrievalQA
 
 # -----------------------------------
@@ -15,19 +12,11 @@ from langchain.chains import RetrievalQA
 # -----------------------------------
 st.set_page_config(page_title="PDF Analyzer Chatbot", layout="wide")
 st.title("📄 PDF Analyzer Chatbot")
-st.write("Upload PDFs and ask questions based on their content.")
 
 # -----------------------------------
-# API KEY (Streamlit-safe)
+# API KEY (Gemini only for chat)
 # -----------------------------------
-# ❌ Do NOT use load_dotenv() on Streamlit Cloud
-# ✅ Use st.secrets instead
-
-GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY")
-
-if not GOOGLE_API_KEY:
-    st.error("GOOGLE_API_KEY not found. Please set it in Streamlit Secrets.")
-    st.stop()
+GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 
 # -----------------------------------
 # PDF UPLOAD
@@ -54,18 +43,16 @@ def extract_text_from_pdfs(pdfs):
 
 def split_text(text):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
-        chunk_overlap=200
+        chunk_size=1000,
+        chunk_overlap=150
     )
     chunks = splitter.split_text(text)
-    # remove empty chunks
-    return [chunk for chunk in chunks if chunk.strip()]
+    return [c for c in chunks if len(c.strip()) > 50]
 
 
 def create_vector_store(chunks):
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="text-embedding-004",
-        google_api_key=GOOGLE_API_KEY
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     return FAISS.from_texts(chunks, embeddings)
 
@@ -76,6 +63,7 @@ def create_qa_chain(vector_store):
         temperature=0.3,
         google_api_key=GOOGLE_API_KEY
     )
+
     return RetrievalQA.from_chain_type(
         llm=llm,
         retriever=vector_store.as_retriever()
@@ -93,11 +81,6 @@ if pdf_files:
             st.stop()
 
         chunks = split_text(raw_text)
-
-        if len(chunks) == 0:
-            st.error("Text splitting failed. No chunks created.")
-            st.stop()
-
         vector_store = create_vector_store(chunks)
         qa_chain = create_qa_chain(vector_store)
 
