@@ -60,7 +60,7 @@ def create_vector_store(chunks):
 
 def create_qa_chain(vector_store):
     llm = ChatGoogleGenerativeAI(
-        model="gemini-pro",
+        model="gemini-1.5-flash",
         temperature=0.3,
         google_api_key=GOOGLE_API_KEY
     )
