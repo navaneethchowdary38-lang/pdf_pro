@@ -9,9 +9,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
-st.set_page_config(page_title="Universal PDF QA (Section Aware)", layout="wide")
+st.set_page_config(page_title="Universal PDF QA (Improved)", layout="wide")
 st.title("📄 Universal PDF Question Answering")
-st.write("Accurate answers with intelligent section detection.")
+st.write("Works for ALL PDFs. Answers are taken ONLY from the PDF.")
 
 # -----------------------------------
 # LOAD MODEL
@@ -47,8 +47,8 @@ def is_section_header(line):
     return (
         line.isupper()
         or line.endswith(":")
-        or re.match(r"^\d+\.", line)
-        or re.search(r"(OUTCOMES|OBJECTIVES|UNIT|EXPERIMENTS|SYLLABUS)", line, re.I)
+        or re.match(r"^\d+(\.\d+)*\s", line)
+        or re.search(r"(OUTCOMES|OBJECTIVES|UNIT|EXPERIMENTS|COURSE|SYLLABUS)", line, re.I)
     )
 
 
@@ -59,7 +59,7 @@ def build_sections(lines):
     for line in lines:
         if is_section_header(line):
             current_section = line
-            sections[current_section] = []
+            sections.setdefault(current_section, [])
         else:
             sections.setdefault(current_section, []).append(line)
 
@@ -73,9 +73,11 @@ def flatten_sections(sections):
     for section, lines in sections.items():
         paragraph = " ".join(lines)
         sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+
         for sent in sentences:
-            if len(sent.strip()) > 30:
-                texts.append(sent.strip())
+            sent = sent.strip()
+            if len(sent) > 30:
+                texts.append(sent)
                 meta.append(section)
 
     return texts, meta
@@ -90,12 +92,24 @@ def search_answer(question, texts, meta, embeddings, top_k=6):
     scores = cosine_similarity(q_emb, embeddings)[0]
 
     ranked = np.argsort(scores)[::-1]
+
     answers = []
+    seen = set()
 
     for i in ranked:
-        if scores[i] < 0.35:
-            break
-        answers.append((meta[i], texts[i]))
+        sentence = texts[i]
+        section = meta[i]
+
+        if len(sentence) < 30:
+            continue
+
+        key = sentence.lower()
+        if key in seen:
+            continue
+
+        answers.append((section, sentence))
+        seen.add(key)
+
         if len(answers) == top_k:
             break
 
@@ -105,27 +119,27 @@ def search_answer(question, texts, meta, embeddings, top_k=6):
 # MAIN LOGIC
 # -----------------------------------
 if pdf_file:
-    with st.spinner("Analyzing PDF structure..."):
+    with st.spinner("Analyzing PDF and building index..."):
         lines = extract_lines(pdf_file)
         sections = build_sections(lines)
         texts, meta = flatten_sections(sections)
         embeddings = embed_texts(texts)
 
-    st.success(f"Indexed {len(texts)} statements across {len(sections)} sections")
+    st.success(f"Indexed {len(texts)} statements from {len(sections)} sections")
 
     question = st.text_input("Ask a question")
 
     if question:
         answers = search_answer(question, texts, meta, embeddings)
 
-        st.subheader("Answer (From Relevant Section)")
+        st.subheader("Answer (Exact text from PDF)")
 
         if answers:
             for section, text in answers:
                 st.markdown(f"**{section}**")
                 st.write(f"- {text}")
         else:
-            st.warning("No relevant section found.")
+            st.warning("No relevant answer found in the document.")
 
 else:
     st.info("Upload a PDF to begin.")
