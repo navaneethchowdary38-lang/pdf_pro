@@ -1,18 +1,16 @@
 import streamlit as st
 from pypdf import PdfReader
+import re
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-
-from transformers import pipeline
 
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
-st.set_page_config(page_title="PDF QA (Accurate)", layout="wide")
-st.title("📄 PDF Question Answering (Accurate)")
-st.write("Answers are extracted EXACTLY from the PDF (no hallucination).")
+st.set_page_config(page_title="PDF QA (Exact & Accurate)", layout="wide")
+st.title("📄 PDF Question Answering (Exact)")
+st.write("Answers are returned EXACTLY as written in the PDF.")
 
 # -----------------------------------
 # PDF UPLOAD
@@ -37,32 +35,23 @@ def extract_text_from_pdfs(pdfs):
     return text
 
 
-def split_text(text):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=700,      # slightly larger for lists
-        chunk_overlap=150
-    )
-    return splitter.split_text(text)
+def split_into_sentences(text):
+    # Clean spacing
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Sentence split
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+
+    # Filter very short lines
+    return [s.strip() for s in sentences if len(s.strip()) > 40]
 
 
-def build_vector_store(chunks):
+def build_vector_store(sentences):
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
-    return FAISS.from_texts(chunks, embeddings)
+    return FAISS.from_texts(sentences, embeddings)
 
-
-# -----------------------------------
-# LOAD EXTRACTIVE QA MODEL
-# -----------------------------------
-@st.cache_resource
-def load_qa_model():
-    return pipeline(
-        "question-answering",
-        model="deepset/roberta-base-squad2"
-    )
-
-qa_model = load_qa_model()
 
 # -----------------------------------
 # MAIN LOGIC
@@ -70,39 +59,40 @@ qa_model = load_qa_model()
 if pdf_files:
     with st.spinner("Processing PDFs..."):
         raw_text = extract_text_from_pdfs(pdf_files)
-        chunks = split_text(raw_text)
-        vector_store = build_vector_store(chunks)
 
-    st.success("PDFs processed successfully!")
+        if not raw_text.strip():
+            st.error("No text found in PDFs.")
+            st.stop()
 
-    question = st.text_input("Ask a question (use wording from the PDF)")
+        sentences = split_into_sentences(raw_text)
+        vector_store = build_vector_store(sentences)
+
+    st.success("PDF indexed successfully!")
+
+    question = st.text_input(
+        "Ask a question (use wording similar to the PDF)"
+    )
 
     if question:
-        # retrieve more chunks to avoid missing list items
-        docs = vector_store.similarity_search(question, k=8)
+        # Retrieve many sentences to avoid missing list items
+        results = vector_store.similarity_search(question, k=20)
 
         answers = []
+        seen = set()
 
-        for doc in docs:
-            result = qa_model(
-                question=question,
-                context=doc.page_content
-            )
+        for r in results:
+            sentence = r.page_content.strip()
+            if sentence not in seen:
+                seen.add(sentence)
+                answers.append(sentence)
 
-            # LOWER threshold – extractive models are conservative
-            if result["score"] > 0.05:
-                answers.append(result["answer"].strip())
-
-        # remove duplicates while preserving order
-        answers = list(dict.fromkeys(answers))
-
-        st.subheader("Answer (from PDF)")
+        st.subheader("Answer (Exact text from PDF)")
 
         if answers:
             for ans in answers:
                 st.write(f"- {ans}")
         else:
-            st.write("Answer not found in the document.")
+            st.write("No matching text found.")
 
 else:
     st.info("Please upload at least one PDF.")
