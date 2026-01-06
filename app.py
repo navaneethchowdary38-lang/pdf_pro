@@ -5,17 +5,16 @@ import re
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
-st.set_page_config(page_title="PDF QA (Section Accurate)", layout="wide")
-st.title("📄 PDF Question Answering (Section Accurate)")
-st.write("Answers are extracted EXACTLY from the correct section of the PDF.")
+st.set_page_config(page_title="PDF QA (Question Enabled)", layout="wide")
+st.title("📄 PDF Question Answering")
+st.write("Ask questions and get EXACT answers from the PDF.")
 
 # -----------------------------------
 # PDF UPLOAD
 # -----------------------------------
-pdf_files = st.file_uploader(
-    "Upload PDF files",
-    type=["pdf"],
-    accept_multiple_files=False
+pdf_file = st.file_uploader(
+    "Upload PDF file",
+    type=["pdf"]
 )
 
 # -----------------------------------
@@ -25,41 +24,66 @@ def extract_full_text(pdf):
     reader = PdfReader(pdf)
     text = ""
     for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text + "\n"
+        if page.extract_text():
+            text += page.extract_text() + "\n"
     return re.sub(r"\s+", " ", text)
 
 # -----------------------------------
-# SECTION EXTRACTION (KEY FIX)
+# SECTION EXTRACTION
 # -----------------------------------
-def extract_course_outcomes(text):
-    pattern = r"COURSE OUTCOMES:(.*?)(EXPERIMENTS:|COURSE OBJECTIVES:)"
+def extract_section(text, start, end_list):
+    pattern = start + r"(.*?)(" + "|".join(end_list) + r")"
     match = re.search(pattern, text, re.IGNORECASE)
-    if not match:
-        return None
-    return match.group(1).strip()
+    if match:
+        return match.group(1).strip()
+    return None
 
 # -----------------------------------
 # MAIN LOGIC
 # -----------------------------------
-if pdf_files:
-    with st.spinner("Reading PDF..."):
-        text = extract_full_text(pdf_files)
-        course_outcomes = extract_course_outcomes(text)
+if pdf_file:
+    text = extract_full_text(pdf_file)
 
-    st.subheader("Question Example")
-    st.code("What are the course outcomes?")
+    question = st.text_input("Ask a question")
 
-    st.subheader("Answer (Exact from PDF)")
+    if question:
+        q = question.lower()
 
-    if course_outcomes:
-        # Clean numbered formatting
-        outcomes = re.findall(r"\d+\.\s.*?(?=\d+\.|$)", course_outcomes)
-        for o in outcomes:
-            st.write(f"- {o.strip()}")
-    else:
-        st.error("COURSE OUTCOMES section not found in this PDF.")
+        if "course outcome" in q:
+            answer = extract_section(
+                text,
+                "COURSE OUTCOMES:",
+                ["EXPERIMENTS:", "COURSE OBJECTIVES:"]
+            )
+
+        elif "course objective" in q:
+            answer = extract_section(
+                text,
+                "COURSE OBJECTIVES:",
+                ["COURSE OUTCOMES:", "EXPERIMENTS:"]
+            )
+
+        elif "experiment" in q:
+            answer = extract_section(
+                text,
+                "EXPERIMENTS:",
+                ["COURSE OUTCOMES:", "COURSE OBJECTIVES:"]
+            )
+
+        else:
+            answer = None
+
+        st.subheader("Answer")
+
+        if answer:
+            points = re.findall(r"\d+\.\s.*?(?=\d+\.|$)", answer)
+            if points:
+                for p in points:
+                    st.write(f"- {p.strip()}")
+            else:
+                st.write(answer)
+        else:
+            st.warning("Question not supported. Try asking about course outcomes, objectives, or experiments.")
 
 else:
-    st.info("Please upload a PDF.")
+    st.info("Please upload a PDF to start.")
