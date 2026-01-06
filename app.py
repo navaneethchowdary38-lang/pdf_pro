@@ -9,9 +9,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
-st.set_page_config(page_title="Universal PDF QA", layout="wide")
+st.set_page_config(page_title="Universal PDF QA (Section Aware)", layout="wide")
 st.title("📄 Universal PDF Question Answering")
-st.write("Ask ANY question. Answers come ONLY from the PDF.")
+st.write("Accurate answers with intelligent section detection.")
 
 # -----------------------------------
 # LOAD MODEL
@@ -30,50 +30,102 @@ pdf_file = st.file_uploader("Upload any PDF", type=["pdf"])
 # -----------------------------------
 # FUNCTIONS
 # -----------------------------------
-def extract_text(pdf):
+def extract_lines(pdf):
     reader = PdfReader(pdf)
-    text = ""
+    lines = []
     for page in reader.pages:
-        if page.extract_text():
-            text += page.extract_text() + " "
-    return re.sub(r"\s+", " ", text)
+        text = page.extract_text()
+        if text:
+            for line in text.split("\n"):
+                line = re.sub(r"\s+", " ", line).strip()
+                if len(line) > 5:
+                    lines.append(line)
+    return lines
 
-def split_into_sentences(text):
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    return [s.strip() for s in sentences if len(s.strip()) > 30]
 
-def embed_sentences(sentences):
-    return model.encode(sentences)
+def is_section_header(line):
+    return (
+        line.isupper()
+        or line.endswith(":")
+        or re.match(r"^\d+\.", line)
+        or re.search(r"(OUTCOMES|OBJECTIVES|UNIT|EXPERIMENTS|SYLLABUS)", line, re.I)
+    )
 
-def search_answer(question, sentences, embeddings, top_k=5):
+
+def build_sections(lines):
+    sections = {}
+    current_section = "GENERAL"
+
+    for line in lines:
+        if is_section_header(line):
+            current_section = line
+            sections[current_section] = []
+        else:
+            sections.setdefault(current_section, []).append(line)
+
+    return sections
+
+
+def flatten_sections(sections):
+    texts = []
+    meta = []
+
+    for section, lines in sections.items():
+        paragraph = " ".join(lines)
+        sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+        for sent in sentences:
+            if len(sent.strip()) > 30:
+                texts.append(sent.strip())
+                meta.append(section)
+
+    return texts, meta
+
+
+def embed_texts(texts):
+    return model.encode(texts)
+
+
+def search_answer(question, texts, meta, embeddings, top_k=6):
     q_emb = model.encode([question])
     scores = cosine_similarity(q_emb, embeddings)[0]
-    top_idx = np.argsort(scores)[::-1][:top_k]
-    return [sentences[i] for i in top_idx if scores[i] > 0.35]
+
+    ranked = np.argsort(scores)[::-1]
+    answers = []
+
+    for i in ranked:
+        if scores[i] < 0.35:
+            break
+        answers.append((meta[i], texts[i]))
+        if len(answers) == top_k:
+            break
+
+    return answers
 
 # -----------------------------------
 # MAIN LOGIC
 # -----------------------------------
 if pdf_file:
-    with st.spinner("Processing PDF..."):
-        text = extract_text(pdf_file)
-        sentences = split_into_sentences(text)
-        embeddings = embed_sentences(sentences)
+    with st.spinner("Analyzing PDF structure..."):
+        lines = extract_lines(pdf_file)
+        sections = build_sections(lines)
+        texts, meta = flatten_sections(sections)
+        embeddings = embed_texts(texts)
 
-    st.success(f"PDF loaded successfully ({len(sentences)} sentences indexed)")
+    st.success(f"Indexed {len(texts)} statements across {len(sections)} sections")
 
     question = st.text_input("Ask a question")
 
     if question:
-        answers = search_answer(question, sentences, embeddings)
+        answers = search_answer(question, texts, meta, embeddings)
 
-        st.subheader("Answer (Exact text from PDF)")
+        st.subheader("Answer (From Relevant Section)")
 
         if answers:
-            for ans in answers:
-                st.write(f"- {ans}")
+            for section, text in answers:
+                st.markdown(f"**{section}**")
+                st.write(f"- {text}")
         else:
-            st.warning("No exact answer found in the document.")
+            st.warning("No relevant section found.")
 
 else:
-    st.info("Upload a PDF to start.")
+    st.info("Upload a PDF to begin.")
