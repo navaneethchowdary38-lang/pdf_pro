@@ -2,15 +2,12 @@ import streamlit as st
 from pypdf import PdfReader
 import re
 
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
-st.set_page_config(page_title="PDF QA (Exact & Accurate)", layout="wide")
-st.title("📄 PDF Question Answering (Exact)")
-st.write("Answers are returned EXACTLY as written in the PDF.")
+st.set_page_config(page_title="PDF QA (Section Accurate)", layout="wide")
+st.title("📄 PDF Question Answering (Section Accurate)")
+st.write("Answers are extracted EXACTLY from the correct section of the PDF.")
 
 # -----------------------------------
 # PDF UPLOAD
@@ -18,81 +15,51 @@ st.write("Answers are returned EXACTLY as written in the PDF.")
 pdf_files = st.file_uploader(
     "Upload PDF files",
     type=["pdf"],
-    accept_multiple_files=True
+    accept_multiple_files=False
 )
 
 # -----------------------------------
-# FUNCTIONS
+# TEXT EXTRACTION
 # -----------------------------------
-def extract_text_from_pdfs(pdfs):
+def extract_full_text(pdf):
+    reader = PdfReader(pdf)
     text = ""
-    for pdf in pdfs:
-        reader = PdfReader(pdf)
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-    return text
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text + "\n"
+    return re.sub(r"\s+", " ", text)
 
-
-def split_into_sentences(text):
-    # Clean spacing
-    text = re.sub(r"\s+", " ", text).strip()
-
-    # Sentence split
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-
-    # Filter very short lines
-    return [s.strip() for s in sentences if len(s.strip()) > 40]
-
-
-def build_vector_store(sentences):
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-    return FAISS.from_texts(sentences, embeddings)
-
+# -----------------------------------
+# SECTION EXTRACTION (KEY FIX)
+# -----------------------------------
+def extract_course_outcomes(text):
+    pattern = r"COURSE OUTCOMES:(.*?)(EXPERIMENTS:|COURSE OBJECTIVES:)"
+    match = re.search(pattern, text, re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).strip()
 
 # -----------------------------------
 # MAIN LOGIC
 # -----------------------------------
 if pdf_files:
-    with st.spinner("Processing PDFs..."):
-        raw_text = extract_text_from_pdfs(pdf_files)
+    with st.spinner("Reading PDF..."):
+        text = extract_full_text(pdf_files)
+        course_outcomes = extract_course_outcomes(text)
 
-        if not raw_text.strip():
-            st.error("No text found in PDFs.")
-            st.stop()
+    st.subheader("Question Example")
+    st.code("What are the course outcomes?")
 
-        sentences = split_into_sentences(raw_text)
-        vector_store = build_vector_store(sentences)
+    st.subheader("Answer (Exact from PDF)")
 
-    st.success("PDF indexed successfully!")
-
-    question = st.text_input(
-        "Ask a question (use wording similar to the PDF)"
-    )
-
-    if question:
-        # Retrieve many sentences to avoid missing list items
-        results = vector_store.similarity_search(question, k=20)
-
-        answers = []
-        seen = set()
-
-        for r in results:
-            sentence = r.page_content.strip()
-            if sentence not in seen:
-                seen.add(sentence)
-                answers.append(sentence)
-
-        st.subheader("Answer (Exact text from PDF)")
-
-        if answers:
-            for ans in answers:
-                st.write(f"- {ans}")
-        else:
-            st.write("No matching text found.")
+    if course_outcomes:
+        # Clean numbered formatting
+        outcomes = re.findall(r"\d+\.\s.*?(?=\d+\.|$)", course_outcomes)
+        for o in outcomes:
+            st.write(f"- {o.strip()}")
+    else:
+        st.error("COURSE OUTCOMES section not found in this PDF.")
 
 else:
-    st.info("Please upload at least one PDF.")
+    st.info("Please upload a PDF.")
