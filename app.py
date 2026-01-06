@@ -1,89 +1,79 @@
 import streamlit as st
 from pypdf import PdfReader
 import re
+import numpy as np
+
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # -----------------------------------
 # STREAMLIT CONFIG
 # -----------------------------------
-st.set_page_config(page_title="PDF QA (Question Enabled)", layout="wide")
-st.title("📄 PDF Question Answering")
-st.write("Ask questions and get EXACT answers from the PDF.")
+st.set_page_config(page_title="Universal PDF QA", layout="wide")
+st.title("📄 Universal PDF Question Answering")
+st.write("Ask ANY question. Answers come ONLY from the PDF.")
+
+# -----------------------------------
+# LOAD MODEL
+# -----------------------------------
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+model = load_model()
 
 # -----------------------------------
 # PDF UPLOAD
 # -----------------------------------
-pdf_file = st.file_uploader(
-    "Upload PDF file",
-    type=["pdf"]
-)
+pdf_file = st.file_uploader("Upload any PDF", type=["pdf"])
 
 # -----------------------------------
-# TEXT EXTRACTION
+# FUNCTIONS
 # -----------------------------------
-def extract_full_text(pdf):
+def extract_text(pdf):
     reader = PdfReader(pdf)
     text = ""
     for page in reader.pages:
         if page.extract_text():
-            text += page.extract_text() + "\n"
+            text += page.extract_text() + " "
     return re.sub(r"\s+", " ", text)
 
-# -----------------------------------
-# SECTION EXTRACTION
-# -----------------------------------
-def extract_section(text, start, end_list):
-    pattern = start + r"(.*?)(" + "|".join(end_list) + r")"
-    match = re.search(pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return None
+def split_into_sentences(text):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    return [s.strip() for s in sentences if len(s.strip()) > 30]
+
+def embed_sentences(sentences):
+    return model.encode(sentences)
+
+def search_answer(question, sentences, embeddings, top_k=5):
+    q_emb = model.encode([question])
+    scores = cosine_similarity(q_emb, embeddings)[0]
+    top_idx = np.argsort(scores)[::-1][:top_k]
+    return [sentences[i] for i in top_idx if scores[i] > 0.35]
 
 # -----------------------------------
 # MAIN LOGIC
 # -----------------------------------
 if pdf_file:
-    text = extract_full_text(pdf_file)
+    with st.spinner("Processing PDF..."):
+        text = extract_text(pdf_file)
+        sentences = split_into_sentences(text)
+        embeddings = embed_sentences(sentences)
+
+    st.success(f"PDF loaded successfully ({len(sentences)} sentences indexed)")
 
     question = st.text_input("Ask a question")
 
     if question:
-        q = question.lower()
+        answers = search_answer(question, sentences, embeddings)
 
-        if "course outcome" in q:
-            answer = extract_section(
-                text,
-                "COURSE OUTCOMES:",
-                ["EXPERIMENTS:", "COURSE OBJECTIVES:"]
-            )
+        st.subheader("Answer (Exact text from PDF)")
 
-        elif "course objective" in q:
-            answer = extract_section(
-                text,
-                "COURSE OBJECTIVES:",
-                ["COURSE OUTCOMES:", "EXPERIMENTS:"]
-            )
-
-        elif "experiment" in q:
-            answer = extract_section(
-                text,
-                "EXPERIMENTS:",
-                ["COURSE OUTCOMES:", "COURSE OBJECTIVES:"]
-            )
-
+        if answers:
+            for ans in answers:
+                st.write(f"- {ans}")
         else:
-            answer = None
-
-        st.subheader("Answer")
-
-        if answer:
-            points = re.findall(r"\d+\.\s.*?(?=\d+\.|$)", answer)
-            if points:
-                for p in points:
-                    st.write(f"- {p.strip()}")
-            else:
-                st.write(answer)
-        else:
-            st.warning("Question not supported. Try asking about course outcomes, objectives, or experiments.")
+            st.warning("No exact answer found in the document.")
 
 else:
-    st.info("Please upload a PDF to start.")
+    st.info("Upload a PDF to start.")
